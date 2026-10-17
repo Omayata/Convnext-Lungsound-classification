@@ -1,0 +1,67 @@
+# ===== Datasets (ใหญ่เกินไปสำหรับ GitHub และมีเงื่อนไข license — ดาวน์โหลดเองตาม datasets/README.md) =====
+datasets/**
+!datasets/README.md
+!datasets/*/
+!datasets/*/.gitkeep
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.m4a
+# อนุญาตไฟล์เสียงตัวอย่างเล็กๆ ที่มากับโค้ดอ้างอิง
+!third_party/**/*.wav
+
+# ===== Model weights / checkpoints =====
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.h5
+*.onnx
+*.tflite
+checkpoints/
+third_party/2_lung_ICBHI/patch-mix_contrastive_learning/save/
+third_party/2_lung_ICBHI/scl_icbhi2017/panns/*.pth
+
+# ===== Precomputed features & experiment outputs =====
+features/
+cache/
+*.npy
+*.npz
+runs/
+logs/
+wandb/
+mlruns/
+lightning_logs/
+results/**
+!results/README.md
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+
+# ===== Environments =====
+.venv/
+venv/
+env/
+.conda/
+.env
+
+# ===== Editors / OS =====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Archives =====
+*.zip
+*.rar
+*.7z
+*.tar.gz

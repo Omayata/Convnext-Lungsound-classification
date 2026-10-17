@@ -1,0 +1,103 @@
+name: Python tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  OMP_NUM_THREADS: 2
+  MKL_NUM_THREADS: 2
+
+jobs:
+  test:
+    name: Run tests on ${{ matrix.os }} with Python ${{ matrix.python }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python: ['3.10', '3.13']
+        torch: [{base: '1.13.0', vision: '0.14.0'}, {base: '2.9.1', vision: '0.24.1'}]
+        testmarker:
+          - '-k "not test_models"'
+          - '-m base'
+          - '-m forward'
+          - '-m backward'
+          - '-m "cfg and not cfg_nonstd"'
+          - '-m cfg_nonstd'
+          - '-m torchscript'
+          - '-m features'
+          - '-m fxforward'
+          - '-m fxbackward'
+        exclude:
+          - python: '3.13'
+            torch: {base: '1.13.0', vision: '0.14.0'}
+          # Keep FX coverage on modern torch; the 1.13 tracer cannot handle dynamic RoPE tensor creation.
+          - torch: {base: '1.13.0', vision: '0.14.0'}
+            testmarker: '-m fxforward'
+          - torch: {base: '1.13.0', vision: '0.14.0'}
+            testmarker: '-m fxbackward'
+    runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: read
+      id-token: write  # mint an OIDC token to exchange for a short-lived HF Hub token
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v6
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Install testing dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+    - name: Install torch on mac
+      if: startsWith(matrix.os, 'macOS')
+      run: pip install --no-cache-dir torch==${{ matrix.torch.base }} torchvision==${{ matrix.torch.vision }}
+    - name: Install torch on Windows
+      if: startsWith(matrix.os, 'windows')
+      run: pip install --no-cache-dir torch==${{ matrix.torch.base }} torchvision==${{ matrix.torch.vision }}
+    - name: Install torch on ubuntu
+      if: startsWith(matrix.os, 'ubuntu')
+      run: |
+        sudo sed -i 's/azure\.//' /etc/apt/sources.list
+        sudo apt update
+        sudo apt install -y google-perftools
+        pip install --no-cache-dir torch==${{ matrix.torch.base }}+cpu torchvision==${{ matrix.torch.vision }}+cpu --index-url https://download.pytorch.org/whl/cpu
+    - name: Install requirements
+      run: |
+        pip install -r requirements.txt
+    - name: Force old numpy for old torch
+      if: ${{ matrix.torch.base == '1.13.0' }}
+      run: pip install --upgrade 'numpy<2.0'
+    - name: Cache HF hub downloads
+      if: contains(matrix.testmarker, 'base')  # only test_model_inference downloads weights
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/huggingface/hub
+        key: hf-hub-${{ matrix.python }}-${{ matrix.torch.base }}-${{ github.run_id }}
+        restore-keys: hf-hub-${{ matrix.python }}-${{ matrix.torch.base }}-
+    - name: Authenticate to HF hub (Trusted Publishers / OIDC)
+      # Authenticated requests get per-user hub rate limits instead of the shared per-IP anonymous
+      # pool that runners exhaust. GitHub only injects the id-token vars when the job has
+      # `id-token: write`, which PRs from forks never get -- and huggingface_hub raises rather than
+      # falling back when HF_OIDC_RESOURCE is set but no token can be minted.
+      run: |
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+          echo "HF_OIDC_RESOURCE=rwightman" >> "$GITHUB_ENV"
+        fi
+    - name: Run tests on Windows
+      if: startsWith(matrix.os, 'windows')
+      env:
+        PYTHONDONTWRITEBYTECODE: 1
+      run: |
+        pytest -vv tests
+    - name: Run '${{ matrix.testmarker }}' tests on Linux / Mac
+      if: ${{ !startsWith(matrix.os, 'windows') }}
+      env:
+        LD_PRELOAD: /usr/lib/x86_64-linux-gnu/libtcmalloc.so.4
+        PYTHONDONTWRITEBYTECODE: 1
+      run: |
+        pytest -vv --forked --durations=0 ${{ matrix.testmarker }} tests

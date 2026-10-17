@@ -1,0 +1,31 @@
+on:
+  push:
+
+name: Secret Leaks
+
+permissions: {}
+
+jobs:
+  trufflehog:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        fetch-depth: 0
+    - name: Secret Scanning
+      uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85 # v3.97.9
+      with:
+        # Pin the scanner image, the action otherwise runs ghcr.io/trufflesecurity/trufflehog:latest
+        # and detector / verifier changes can start failing CI without any repo change.
+        version: 3.97.4
+        # Only fail on verified secrets. Avoids CI breakage from unverified false positives
+        # (e.g. high-entropy base64 blobs in old notebook output cells) surfaced by full-tree
+        # scans when scanner detectors change. See PR #2708 discussion.
+        # 'unknown' = real candidates whose live verification errored (e.g. provider
+        # unreachable), so we still fail on maybe-real secrets; 'unverified' (the noisy
+        # false-positive bucket) is deliberately excluded.
+        # NOTE: use --results=..., not the deprecated/undocumented --only-verified alias.
+        extra_args: --results=verified,unknown

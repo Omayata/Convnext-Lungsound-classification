@@ -1,0 +1,416 @@
+#!/usr/bin/env python3
+"""PyTorch Inference Script
+
+An example inference script that outputs top-k class ids for images in a folder into a csv.
+
+Hacked together by / Copyright 2020 Ross Wightman (https://github.com/rwightman)
+"""
+import argparse
+import json
+import logging
+import os
+import time
+from contextlib import suppress
+from functools import partial
+from sys import maxsize
+
+import numpy as np
+import pandas as pd
+import torch
+
+from timm.data import (
+    create_dataset,
+    create_loader,
+    resolve_input_data_config,
+    ImageNetInfo,
+    infer_imagenet_subset,
+    CustomDatasetInfo,
+    DatasetInfoLabelMapper,
+)
+from timm.layers import apply_test_time_pool
+from timm.models import create_model, parse_model_name, resolve_model_input_args
+from timm.utils import AverageMeter, setup_default_logging, set_jit_fuser, ParseKwargs
+
+try:
+    from functorch.compile import memory_efficient_fusion
+    has_functorch = True
+except ImportError as e:
+    has_functorch = False
+
+has_compile = hasattr(torch, 'compile')
+
+
+_FMT_EXT = {
+    'json': '.json',
+    'json-records': '.json',
+    'json-record': '.json',  # alias of json-records, kept for backwards compat
+    'json-split': '.json',
+    'parquet': '.parquet',
+    'csv': '.csv',
+}
+
+torch.backends.cudnn.benchmark = True
+_logger = logging.getLogger('inference')
+
+
+parser = argparse.ArgumentParser(description='PyTorch ImageNet Inference')
+parser.add_argument('data', nargs='?', metavar='DIR', const=None,
+                    help='path to dataset (*deprecated*, use --data-dir)')
+parser.add_argument('--data-dir', metavar='DIR',
+                    help='path to dataset (root dir)')
+parser.add_argument('--dataset', metavar='NAME', default='',
+                    help='dataset type + name ("<type>/<name>") (default: ImageFolder or ImageTar if empty)')
+parser.add_argument('--split', metavar='NAME', default='validation',
+                    help='dataset split (default: validation)')
+parser.add_argument('--model', '-m', metavar='MODEL', default='resnet50',
+                    help='model architecture (default: resnet50)')
+parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
+                    help='number of data loading workers (default: 2)')
+parser.add_argument('-b', '--batch-size', default=256, type=int,
+                    metavar='N', help='mini-batch size (default: 256)')
+parser.add_argument('--img-size', default=None, type=int,
+                    metavar='N', help='Input image dimension, uses model default if empty')
+parser.add_argument('--in-chans', type=int, default=None, metavar='N',
+                    help='Image input channels (default: None => 3)')
+parser.add_argument('--input-size', default=None, nargs=3, type=int, metavar='N',
+                    help='Input all image dimensions (d h w, e.g. --input-size 3 224 224), uses model default if empty')
+parser.add_argument('--use-train-size', action='store_true', default=False,
+                    help='force use of train input size, even when test size is specified in pretrained cfg')
+parser.add_argument('--crop-pct', default=None, type=float,
+                    metavar='N', help='Input image center crop pct')
+parser.add_argument('--crop-mode', default=None, type=str,
+                    metavar='N', help='Input image crop mode (squash, border, center). Model default if None.')
+parser.add_argument('--mean', type=float, nargs='+', default=None, metavar='MEAN',
+                    help='Override mean pixel value of dataset')
+parser.add_argument('--std', type=float,  nargs='+', default=None, metavar='STD',
+                    help='Override std deviation of of dataset')
+parser.add_argument('--interpolation', default='', type=str, metavar='NAME',
+                    help='Image resize interpolation type (overrides model)')
+parser.add_argument('--num-classes', type=int, default=None,
+                    help='Number classes in dataset')
+parser.add_argument('--class-map', default='', type=str, metavar='FILENAME',
+                    help='path to class to idx mapping file (default: "")')
+parser.add_argument('--log-freq', default=10, type=int,
+                    metavar='N', help='batch logging frequency (default: 10)')
+parser.add_argument('--checkpoint', default='', type=str, metavar='PATH',
+                    help='path to latest checkpoint (default: none)')
+parser.add_argument('--pretrained', dest='pretrained', action='store_true',
+                    help='use pre-trained model')
+parser.add_argument('--num-gpu', type=int, default=1,
+                    help='Number of GPUS to use')
+parser.add_argument('--test-pool', dest='test_pool', action='store_true',
+                    help='enable test time pool')
+parser.add_argument('--channels-last', action='store_true', default=False,
+                    help='Use channels_last memory layout')
+parser.add_argument('--device', default='cuda', type=str,
+                    help="Device (accelerator) to use.")
+parser.add_argument('--amp', action='store_true', default=False,
+                    help='use Native AMP for mixed precision training')
+parser.add_argument('--amp-dtype', default='float16', type=str,
+                    help='lower precision AMP dtype (default: float16)')
+parser.add_argument('--model-dtype', default=None, type=str,
+                   help='Model dtype override (non-AMP) (default: float32)')
+parser.add_argument('--fuser', default='', type=str,
+                    help="Select jit fuser. One of ('', 'te', 'old', 'nvfuser')")
+parser.add_argument('--model-kwargs', nargs='*', default={}, action=ParseKwargs)
+parser.add_argument('--torchcompile-mode', type=str, default=None,
+                    help="torch.compile mode (default: None).")
+
+scripting_group = parser.add_mutually_exclusive_group()
+scripting_group.add_argument('--torchscript', default=False, action='store_true',
+                             help='torch.jit.script the full model')
+scripting_group.add_argument('--torchcompile', nargs='?', type=str, default=None, const='inductor',
+                             help="Enable compilation w/ specified backend (default: inductor).")
+scripting_group.add_argument('--aot-autograd', default=False, action='store_true',
+                             help="Enable AOT Autograd support.")
+
+parser.add_argument('--results-dir', type=str, default=None,
+                    help='folder for output results')
+parser.add_argument('--results-file', type=str, default=None,
+                    help='results filename (relative to results-dir)')
+parser.add_argument('--results-format', type=str, nargs='+', default=['csv'],
+                    help='results format (one of "csv", "json", "json-records", "json-split", "parquet")')
+parser.add_argument('--results-separate-col', action='store_true', default=False,
+                    help='separate output columns per result index.')
+parser.add_argument('--topk', default=1, type=int,
+                    metavar='N', help='Top-k to output to CSV')
+parser.add_argument('--fullname', action='store_true', default=False,
+                    help='use full sample name in output (not just basename).')
+parser.add_argument('--filename-col', type=str, default='filename',
+                    help='name for filename / sample name column')
+parser.add_argument('--index-col', type=str, default='index',
+                    help='name for output indices column(s)')
+parser.add_argument('--label-col', type=str, default='label',
+                    help='name for output indices column(s)')
+parser.add_argument('--output-col', type=str, default=None,
+                    help='name for logit/probs output column(s)')
+parser.add_argument('--output-type', type=str, default='prob',
+                    help='output type colum ("prob" for probabilities, "logit" for raw logits)')
+parser.add_argument('--label-type', type=str, default='description',
+                    help='type of label to output, one of  "none", "name", "description", "detailed"')
+parser.add_argument('--include-index', action='store_true', default=False,
+                    help='include the class index in results')
+parser.add_argument('--exclude-output', action='store_true', default=False,
+                    help='exclude logits/probs from results, just indices. topk must be set !=0.')
+parser.add_argument('--no-console-results', action='store_true', default=False,
+                    help='disable printing the inference results to the console')
+
+
+def main():
+    setup_default_logging()
+    args = parser.parse_args()
+    # might as well try to do something useful...
+    args.pretrained = args.pretrained or not args.checkpoint
+
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+
+    device = torch.device(args.device)
+
+    model_dtype = None
+    if args.model_dtype:
+        assert args.model_dtype in ('float32', 'float16', 'bfloat16')
+        model_dtype = getattr(torch, args.model_dtype)
+
+    # resolve AMP arguments based on PyTorch availability
+    amp_autocast = suppress
+    if args.amp:
+        assert model_dtype is None or model_dtype == torch.float32, 'float32 model dtype must be used with AMP'
+        assert args.amp_dtype in ('float16', 'bfloat16')
+        amp_dtype = torch.bfloat16 if args.amp_dtype == 'bfloat16' else torch.float16
+        amp_autocast = partial(torch.autocast, device_type=device.type, dtype=amp_dtype)
+        _logger.info('Running inference in mixed precision with native PyTorch AMP.')
+    else:
+        _logger.info('Running inference in float32. AMP not enabled.')
+
+    if args.fuser:
+        set_jit_fuser(args.fuser)
+
+    # create model
+    model = create_model(
+        **resolve_model_input_args(
+            args.model,
+            vars(args),
+            num_classes=args.num_classes,
+            pretrained=args.pretrained,
+            checkpoint_path=args.checkpoint,
+            **args.model_kwargs,
+        )
+    )
+    if args.num_classes is None:
+        assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
+        args.num_classes = model.num_classes
+    # Preserve metadata before TorchScript/compile/DataParallel wrappers, which do
+    # not consistently forward custom model attributes such as pretrained_cfg.
+    pretrained_cfg = dict(getattr(model, 'pretrained_cfg', {}) or {})
+
+    _logger.info(
+        f'Model {args.model} created, param count: {sum([m.numel() for m in model.parameters()])}')
+
+    data_config = resolve_input_data_config(model, vars(args), use_test_size=not args.use_train_size)
+    test_time_pool = False
+    if args.test_pool:
+        model, test_time_pool = apply_test_time_pool(model, data_config)
+
+    model = model.to(device=device, dtype=model_dtype)
+    model.eval()
+    if args.channels_last:
+        model = model.to(memory_format=torch.channels_last)
+
+    if args.torchscript:
+        model = torch.jit.script(model)
+    elif args.torchcompile:
+        assert has_compile, 'A version of torch w/ torch.compile() is required for --compile, possibly a nightly.'
+        torch._dynamo.reset()
+        model = torch.compile(model, backend=args.torchcompile, mode=args.torchcompile_mode)
+    elif args.aot_autograd:
+        assert has_functorch, "functorch is needed for --aot-autograd"
+        model = memory_efficient_fusion(model)
+
+    if args.num_gpu > 1:
+        model = torch.nn.DataParallel(model, device_ids=list(range(args.num_gpu)))
+
+    root_dir = args.data or args.data_dir
+    dataset = create_dataset(
+        root=root_dir,
+        name=args.dataset,
+        split=args.split,
+        class_map=args.class_map,
+    )
+
+    if test_time_pool:
+        data_config['crop_pct'] = 1.0
+
+    workers = 1 if 'tfds' in args.dataset or 'wds' in args.dataset else args.workers
+    loader = create_loader(
+        dataset,
+        batch_size=args.batch_size,
+        use_prefetcher=True,
+        num_workers=workers,
+        device=device,
+        img_dtype=model_dtype or torch.float32,
+        **data_config,
+    )
+
+    to_label = None
+    if args.label_type in ('name', 'description', 'detail', 'detailed'):
+        dataset_info = None
+        label_names = pretrained_cfg.get('label_names', None)
+        label_descriptions = pretrained_cfg.get('label_descriptions', None)
+        if label_names is not None:
+            # custom labels pushed with the model (e.g. fine-tuned on a non-ImageNet dataset)
+            dataset_info = CustomDatasetInfo(
+                label_names=label_names,
+                label_descriptions=label_descriptions,
+            )
+        else:
+            imagenet_subset = infer_imagenet_subset({'num_classes': args.num_classes})
+            if imagenet_subset is not None:
+                dataset_info = ImageNetInfo(imagenet_subset)
+            else:
+                _logger.error("Cannot deduce ImageNet subset from model, no labelling will be performed.")
+        if dataset_info is not None:
+            to_label = DatasetInfoLabelMapper(dataset_info, label_type=args.label_type)
+            if args.num_classes:
+                coverage = to_label.coverage(args.num_classes)
+                if coverage.missing:
+                    _logger.warning(
+                        f'Label mapping covers {coverage.mapped} of {args.num_classes} classifier outputs; '
+                        'unmapped predictions will use <unmapped:INDEX>.')
+                if coverage.extra:
+                    _logger.warning(
+                        f'Label mapping contains {coverage.extra} indices outside the classifier output range; '
+                        'those labels will be ignored.')
+            to_label = np.vectorize(to_label, otypes=[object])
+
+    top_k = min(args.topk, args.num_classes)
+    batch_time = AverageMeter()
+    end = time.time()
+    all_indices = []
+    all_labels = []
+    all_outputs = []
+    use_probs = args.output_type == 'prob'
+    with torch.inference_mode():
+        for batch_idx, (input, _) in enumerate(loader):
+
+            with amp_autocast():
+                output = model(input)
+
+            if use_probs:
+                output = output.softmax(-1)
+
+            if top_k:
+                output, indices = output.topk(top_k)
+                np_indices = indices.cpu().numpy()
+                if args.include_index:
+                    all_indices.append(np_indices)
+                if to_label is not None:
+                    np_labels = to_label(np_indices)
+                    all_labels.append(np_labels)
+
+            all_outputs.append(output.float().cpu().numpy())
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if batch_idx % args.log_freq == 0:
+                _logger.info('Predict: [{0}/{1}] Time {batch_time.val:.3f} ({batch_time.avg:.3f})'.format(
+                    batch_idx, len(loader), batch_time=batch_time))
+
+    all_indices = np.concatenate(all_indices, axis=0) if all_indices else None
+    all_labels = np.concatenate(all_labels, axis=0) if all_labels else None
+    all_outputs = np.concatenate(all_outputs, axis=0).astype(np.float32)
+    filenames = loader.dataset.filenames(basename=not args.fullname)
+
+    output_col = args.output_col or ('prob' if use_probs else 'logit')
+    data_dict = {args.filename_col: filenames}
+    if args.results_separate_col and all_outputs.shape[-1] > 1:
+        if all_indices is not None:
+            for i in range(all_indices.shape[-1]):
+                data_dict[f'{args.index_col}_{i}'] = all_indices[:, i]
+        if all_labels is not None:
+            for i in range(all_labels.shape[-1]):
+                data_dict[f'{args.label_col}_{i}'] = all_labels[:, i]
+        for i in range(all_outputs.shape[-1]):
+            data_dict[f'{output_col}_{i}'] = all_outputs[:, i]
+    else:
+        if all_indices is not None:
+            if all_indices.shape[-1] == 1:
+                all_indices = all_indices.squeeze(-1)
+            data_dict[args.index_col] = list(all_indices)
+        if all_labels is not None:
+            if all_labels.shape[-1] == 1:
+                all_labels = all_labels.squeeze(-1)
+            data_dict[args.label_col] = list(all_labels)
+        if all_outputs.shape[-1] == 1:
+            all_outputs = all_outputs.squeeze(-1)
+        data_dict[output_col] = list(all_outputs)
+
+    df = pd.DataFrame(data=data_dict)
+
+    results_filename = args.results_file
+    if results_filename:
+        filename_no_ext, ext = os.path.splitext(results_filename)
+        if ext and ext in _FMT_EXT.values():
+            # if filename provided with one of expected ext,
+            # remove it as it will be added back
+            results_filename = filename_no_ext
+    else:
+        # base default filename on model name + img-size, w/o any source prefix or path separators
+        img_size = data_config["input_size"][1]
+        source, model_id = parse_model_name(args.model)
+        if source == 'local-dir':
+            # dir basename alone is often meaningless (checkpoint, final, ...), prefix w/ the architecture
+            dir_name = os.path.basename(os.path.normpath(model_id))
+            model_name = f"{pretrained_cfg.get('architecture', 'model')}-{dir_name}"
+        else:
+            # registry name incl. any pretrained tag, or hf-hub repo name w/o the owner
+            model_name = model_id.rsplit('/', 1)[-1]
+        results_filename = f'{model_name}-{img_size}'
+
+    if args.results_dir:
+        os.makedirs(args.results_dir, exist_ok=True)
+        results_filename = os.path.join(args.results_dir, results_filename)
+
+    unique_names = df[args.filename_col].is_unique
+    if not unique_names:
+        # e.g. the same basename in different class folders, use --fullname to disambiguate
+        _logger.warning(
+            f'Sample names in "{args.filename_col}" are not unique (use --fullname), '
+            'json results will be written as a list of records instead of keyed by name.'
+        )
+
+    for fmt in args.results_format:
+        save_results(df, results_filename, fmt, filename_col=args.filename_col)
+
+    if not args.no_console_results:
+        print(f'--result')
+        if unique_names:
+            print(df.set_index(args.filename_col).to_json(orient='index', indent=4))
+        else:
+            print(df.to_json(orient='records', indent=4))
+
+
+def save_results(df, results_filename, results_format='csv', filename_col='filename'):
+    np.set_printoptions(threshold=maxsize)
+    results_filename += _FMT_EXT[results_format]
+    if results_format == 'parquet':
+        df.set_index(filename_col).to_parquet(results_filename)
+    elif results_format == 'json':
+        if df[filename_col].is_unique:
+            df.set_index(filename_col).to_json(results_filename, indent=4, orient='index')
+        else:
+            # orient='index' requires unique names, fall back to records
+            df.to_json(results_filename, indent=4, orient='records')
+    elif results_format in ('json-records', 'json-record'):
+        df.to_json(results_filename, lines=True, orient='records')
+    elif results_format == 'json-split':
+        df.to_json(results_filename, indent=4, orient='split', index=False)
+    else:
+        df.to_csv(results_filename, index=False)
+
+
+if __name__ == '__main__':
+    main()

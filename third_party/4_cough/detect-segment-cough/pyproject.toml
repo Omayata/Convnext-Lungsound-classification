@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coughkit"
+version = "0.3.0"
+description = "Detect, segment, and count cough sounds in audio recordings."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.1",
+    "scipy>=1.14",
+    "librosa>=0.11",
+    "soundfile>=0.12.1",
+    "scikit-learn>=1.6",
+    "xgboost-cpu>=2.1",
+    "sounddevice>=0.4",
+    "audiokit",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "tqdm"]
+train = ["pandas>=2.2", "tqdm"]
+
+[project.scripts]
+coughkit = "coughkit.cli.main:main"
+cough-detect = "coughkit.cli.detect:main"
+cough-segment = "coughkit.cli.segment:main"
+cough-count = "coughkit.cli.count:main"
+
+# audiokit is a local sibling package providing the shared audio plumbing
+# (energy-VAD + SNR live there now). Resolved via path for local development;
+# uv reads this source, so use `uv sync` or `uv pip install -e ../audiokit`
+# before `uv pip install -e .`.
+[tool.uv.sources]
+audiokit = { path = "../audiokit", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore::DeprecationWarning:audioread",
+]

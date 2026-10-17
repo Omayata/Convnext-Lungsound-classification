@@ -1,0 +1,258 @@
+- sections: 
+  - local: index
+    title: Home
+  - local: quickstart
+    title: Quickstart
+  - local: installation
+    title: Installation
+  - local: changes
+    title: Changelog
+  title: Get started
+- sections:
+  - local: model_api
+    title: The timm Model API
+  - local: model_adaptation
+    title: Adapt and Export Models
+  - local: feature_extraction
+    title: Using Pretrained Models as Feature Extractors
+  - local: hparams
+    title: Hyper-Parameters (HParams)
+  - local: training_script
+    title: Using The Official Training Script
+  - local: hf_hub
+    title: Share and Load Models from the 🤗 Hugging Face Hub
+  title: Tutorials
+- sections:
+  - local: models
+    title: Model Families
+  - local: results
+    title: Results
+  - sections:
+    - local: models/xception-aligned
+      title: Aligned Xception
+    - local: models/byobnet
+      title: BYOBNet (GENet, RepVGG, MobileOne, ...)
+    - local: models/convmixer
+      title: ConvMixer
+    - local: models/convnext
+      title: ConvNeXt
+    - local: models/cspnet
+      title: CSPNet (CSPResNet, CSPDarkNet, DarkNet)
+    - local: models/cspnext
+      title: CSPNeXt
+    - local: models/densenet
+      title: DenseNet
+    - local: models/dla
+      title: DLA
+    - local: models/dpn
+      title: DPN
+    - local: models/hrnet
+      title: HRNet
+    - local: models/inception-resnet-v2
+      title: Inception-ResNet-v2
+    - local: models/inception-v3
+      title: Inception-v3
+    - local: models/inception-v4
+      title: Inception-v4
+    - local: models/inception-next
+      title: InceptionNeXt
+    - local: models/mambaout
+      title: MambaOut
+    - local: models/nasnet
+      title: NASNet
+    - local: models/nfnet
+      title: NFNet
+    - local: models/pnasnet
+      title: PNASNet
+    - local: models/hgnet
+      title: PP-HGNet
+    - local: models/rdnet
+      title: RDNet
+    - local: models/regnet
+      title: RegNet
+    - local: models/res2net
+      title: Res2Net
+    - local: models/resnest
+      title: ResNeSt
+    - local: models/resnet
+      title: ResNet
+    - local: models/resnetv2
+      title: ResNetV2 (BiT)
+    - local: models/selecsls
+      title: SelecSLS
+    - local: models/senet
+      title: SENet (legacy)
+    - local: models/sknet
+      title: SKNet
+    - local: models/tresnet
+      title: TResNet
+    - local: models/vgg
+      title: VGG
+    - local: models/vovnet
+      title: VoVNet
+    - local: models/xception
+      title: Xception (legacy)
+    title: Convolutional networks
+    isExpanded: false
+  - sections:
+    - local: models/beit
+      title: BEiT
+    - local: models/cait
+      title: CaiT
+    - local: models/convit
+      title: ConViT
+    - local: models/crossvit
+      title: CrossViT
+    - local: models/davit
+      title: DaViT
+    - local: models/deit
+      title: DeiT
+    - local: models/eva
+      title: EVA
+    - local: models/gcvit
+      title: GCViT
+    - local: models/hiera
+      title: Hiera
+    - local: models/hieradet-sam2
+      title: HieraDet (SAM 2)
+    - local: models/mvitv2
+      title: MViTv2
+    - local: models/naflexvit
+      title: NaFlex ViT
+    - local: models/nest
+      title: NesT
+    - local: models/pit
+      title: PiT
+    - local: models/pvt-v2
+      title: PVTv2
+    - local: models/vision-transformer-sam
+      title: Segment Anything ViT
+    - local: models/swin-transformer
+      title: Swin Transformer
+    - local: models/swin-transformer-v2
+      title: Swin Transformer V2
+    - local: models/swin-transformer-v2-cr
+      title: Swin Transformer V2 (CR)
+    - local: models/tnt
+      title: TNT
+    - local: models/twins
+      title: Twins
+    - local: models/vision-transformer-relpos
+      title: Vision Transformer (relative position)
+    - local: models/vision-transformer
+      title: Vision Transformer (ViT)
+    - local: models/volo
+      title: VOLO
+    - local: models/xcit
+      title: XCiT
+    title: Vision Transformers
+    isExpanded: false
+  - sections:
+    - local: models/byoanet
+      title: BYOANet (BoTNet, HaloNet, LambdaNet)
+    - local: models/coat
+      title: CoaT
+    - local: models/csatv2
+      title: CSATv2
+    - local: models/focalnet
+      title: FocalNet
+    - local: models/vision-transformer-hybrid
+      title: Hybrid Vision Transformer
+    - local: models/levit
+      title: LeViT
+    - local: models/maxxvit
+      title: MaxViT and CoAtNet
+    - local: models/metaformer
+      title: MetaFormer (PoolFormer, ConvFormer, CAFormer)
+    - local: models/nextvit
+      title: Next-ViT
+    - local: models/tiny-vit
+      title: TinyViT
+    - local: models/visformer
+      title: Visformer
+    - local: models/vitamin
+      title: ViTamin
+    title: Hybrid convolution / attention networks
+    isExpanded: false
+  - sections:
+    - local: models/cpubone
+      title: CPUBone
+    - local: models/edgenext
+      title: EdgeNeXt
+    - local: models/efficientformer
+      title: EfficientFormer
+    - local: models/efficientformer-v2
+      title: EfficientFormer-V2
+    - local: models/efficientnet
+      title: EfficientNet
+    - local: models/efficientvim
+      title: EfficientViM
+    - local: models/efficientvit-mit
+      title: EfficientViT (MIT)
+    - local: models/efficientvit-msra
+      title: EfficientViT (MSRA)
+    - local: models/fasternet
+      title: FasterNet
+    - local: models/fastvit
+      title: FastViT
+    - local: models/ghostnet
+      title: GhostNet
+    - local: models/hardcorenas
+      title: HardCoRe-NAS
+    - local: models/iformer
+      title: iFormer
+    - local: models/lowformer
+      title: LowFormer
+    - local: models/mobilenetv3
+      title: MobileNet-V3
+    - local: models/mobilevit
+      title: MobileViT
+    - local: models/lcnetv2
+      title: PP-LCNetV2
+    - local: models/repghost
+      title: RepGhost
+    - local: models/repvit
+      title: RepViT
+    - local: models/rexnet
+      title: ReXNet
+    - local: models/shvit
+      title: SHViT
+    - local: models/starnet
+      title: StarNet
+    - local: models/swiftformer
+      title: SwiftFormer
+    title: Efficient and mobile networks
+    isExpanded: false
+  - sections:
+    - local: models/mlp-mixer
+      title: MLP-Mixer, ResMLP and gMLP
+    - local: models/sequencer
+      title: Sequencer
+    title: MLP and other token mixers
+    isExpanded: false
+  - sections:
+    - local: models/deepseek-vit
+      title: DeepSeek ViT
+    - local: models/gemma4-vit
+      title: Gemma 4 ViT
+    - local: models/mobilenetv5
+      title: MobileNet-V5
+    - local: models/qwen3-vit
+      title: Qwen3 ViT
+    title: Multimodal model vision encoders
+    isExpanded: false
+  title: Model Pages
+  isExpanded: false
+- sections:
+  - local: reference/models
+    title: Models
+  - local: reference/data
+    title: Data
+  - local: reference/loss
+    title: Losses
+  - local: reference/optimizers
+    title: Optimizers
+  - local: reference/schedulers
+    title: Learning Rate Schedulers
+  title: Reference
+
