@@ -84,6 +84,8 @@ python scripts/demo_report.py                  # -> results/demo/demo_report.htm
 
 ## 6. อ่านผล demo อย่างไร
 
+รายละเอียดว่าแต่ละส่วนของ report บอกอะไร และควรนำเสนออย่างไร: [`docs/DEMO_REPORT_SUMMARY.md`](DEMO_REPORT_SUMMARY.md)
+
 - demo ฝึก 5 epoch และ seed เดียว **ใช้ดูแนวโน้มเท่านั้น สรุปไม่ได้ว่าวิธีไหนดีกว่าจริง** ผลบน ICBHI แกว่งได้หลาย % ระหว่าง seed และยังไม่ได้ทดสอบสถิติ
 - กราฟ ablation แสดงคะแนนของแต่ละ ablation ลบด้วย `proposed`: แท่งแดง (ติดลบ) = ตัดเทคนิคนั้นออกแล้วแย่ลง แปลว่าเทคนิคนั้นช่วย
 - การสรุปว่า "ดีกว่าจริง" ต้องใช้การทดลองเต็ม: `python -m src.run_experiments --plan main` (5 seeds) แล้ว `python -m src.stats` (paired t-test ทางเดียว + Holm, Friedman + Nemenyi เมื่อมีหลาย dataset)
