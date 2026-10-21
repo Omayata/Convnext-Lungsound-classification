@@ -2,7 +2,8 @@
 
 โค้ดทดลองของหัวข้อ **"Enhanced Lung Sound Classification via Mel–MFCC Feature Fusion and AudioSet-Pretrained ConvNeXt under Patient-Independent Evaluation"** ตรงกับเอกสาร `RGQD/RD_v2.docx`
 
-> **สถานะ (2026-10-18):** pipeline ครบทุกส่วนตาม RD_v2 ทดสอบกับข้อมูลจำลองแล้ว ยังไม่ได้รันกับข้อมูลจริง
+> **สถานะ (2026-10-21):** pipeline ครบทุกส่วนตาม RD_v2 ทดสอบกับข้อมูลจำลองแล้ว ยังไม่ได้รันกับข้อมูลจริง
+> **คนที่จะรัน demo ให้อ่าน [`docs/HANDOFF_DEMO.md`](docs/HANDOFF_DEMO.md) ก่อน**
 > แนวทางเดิม (benchmark ข้ามประเภทเสียง + ESC-50) ใน `docs/HANDOFF.md` ถูกแทนที่ด้วยแนวทางนี้แล้ว
 > รายละเอียดว่า RD แต่ละข้ออยู่ตรงไหนในโค้ด และจุดที่ต่างจากต้นฉบับของคู่เทียบ อยู่ใน [`docs/EXPERIMENT_v2.md`](docs/EXPERIMENT_v2.md)
 
