@@ -3,6 +3,7 @@ datasets/**
 !datasets/README.md
 !datasets/*/
 !datasets/*/.gitkeep
+datasets_dummy/
 *.wav
 *.flac
 *.mp3
