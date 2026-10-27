@@ -171,6 +171,8 @@ def curves(run_root, df):
         h = pd.read_csv(f)
         ax.plot(h["epoch"], h["val_icbhi_score"], marker="o", lw=2.8 if m == "proposed" else 1.4,
                 color=color(m), label=name(m), zorder=3 if m == "proposed" else 2)
+        b = h["val_icbhi_score"].idxmax()            # epoch ที่ถูกเลือกไปเปิด test
+        ax.plot(h["epoch"][b], h["val_icbhi_score"][b], marker="*", ms=16, color=color(m), mec="black", zorder=4)
     ax.set_xlabel("epoch")
     ax.xaxis.get_major_locator().set_params(integer=True)
     ax.set_ylabel("val ICBHI score (%)")
@@ -187,6 +189,8 @@ def main():
     p.add_argument("--run_root", default=str(DEMO / "runs" / "icbhi"))
     p.add_argument("--out", default=str(DEMO / "demo_report.html"))
     p.add_argument("--synthetic", action="store_true", help="ผลมาจากข้อมูลสังเคราะห์ (make_dummy_data.py) ติดป้ายเตือนในรายงาน")
+    p.add_argument("--poc", action="store_true",
+                   help="ผลจากการฝึกเต็ม (สูงสุด 50 epoch + early stopping) เช่น results/results.csv แทน demo 5 epoch")
     a = p.parse_args()
     if not Path(a.csv).exists():
         sys.exit(f"ไม่พบ {a.csv} ให้รัน python -m src.run_experiments --plan demo ก่อน")
@@ -199,9 +203,9 @@ def main():
     ref = ref.iloc[0] if len(ref) else None
 
     cols = ["method", "icbhi_score", "sensitivity", "specificity", "macro_f1",
-            "f1_crackle", "f1_wheeze", "f1_both", "params_M", "epochs_run", "train_time_min"]
+            "f1_crackle", "f1_wheeze", "f1_both", "params_M", "epochs_run", "best_epoch", "train_time_min"]
     heads = ["วิธี", "ICBHI score", "Se", "Sp", "Macro-F1", "F1 crackle", "F1 wheeze", "F1 both",
-             "พารามิเตอร์ (M)", "epoch", "เวลาฝึก (นาที)"]
+             "พารามิเตอร์ (M)", "epoch ที่รัน", "best epoch", "เวลาฝึก (นาที)"]
     t1 = main_df[cols].sort_values("icbhi_score", ascending=False).copy()
     t1["method"] = [f'<span style="color:{color(m)};font-weight:bold">■</span> {name(m)}' for m in t1["method"]]
     t1.columns = heads
@@ -215,12 +219,12 @@ def main():
         t2 = pd.DataFrame({"สิ่งที่เปลี่ยนจากโมเดลที่เสนอ": [ABL[m][1] for m in abl["method"]],
                            "--method": abl["method"], "ICBHI score": abl["icbhi_score"], "Δ ICBHI": abl["d_icbhi"],
                            "Macro-F1": abl["macro_f1"], "Δ Macro-F1": abl["d_f1"],
-                           "สรุป (demo)": ["เทคนิคนี้ช่วย" if v < 0 else "ยังไม่เห็นว่าช่วย" for v in abl["d_icbhi"]]})
+                           "สรุป (seed เดียว)" if a.poc else "สรุป (demo)": ["เทคนิคนี้ช่วย" if v < 0 else "ยังไม่เห็นว่าช่วย" for v in abl["d_icbhi"]]})
 
     imgs = {"main": bar_main(main_df) if len(main_df) else None,
             "abl": bar_ablation(df, ref) if ref is not None else None,
             "cls": bar_per_class(main_df) if len(main_df) else None,
-            "cm": confusions(run_root, ["proposed", "abl_mel_only"]), "curve": curves(run_root, main_df)}
+            "cm": confusions(run_root, ["proposed", "abl_mel_only"]), "curve": curves(run_root, df if a.poc else main_df)}
     n_ep = int(df["epochs_run"].max())
     img = lambda k: f'<img src="data:image/png;base64,{imgs[k]}">' if imgs[k] else "<p>(ไม่มีข้อมูล)</p>"
     tbl = lambda t: t.round(2).to_html(index=False, escape=False) if t is not None else "<p>(ไม่มีข้อมูล)</p>"
@@ -228,6 +232,17 @@ def main():
         note = (f'<p class="note" style="background:#ffe1e1;border-color:#d64545"><b>ข้อมูลสังเคราะห์ ตัวเลขทุกตัวในรายงานนี้ไม่มีความหมาย:</b> '
                 f'เสียงสร้างขึ้นด้วย scripts/make_dummy_data.py (ไม่ใช่เสียงปอดจริง) ใช้ {len(df)} วิธี ฝึก {n_ep} epoch บน CPU '
                 f'น้ำหนัก pretrain เป็นแบบทดสอบ รายงานนี้แสดงแค่ว่า pipeline ทั้งเส้นทำงานได้ และหน้าตาของผลที่จะได้เมื่อรันกับ ICBHI จริง</p>')
+    elif a.poc:
+        seeds = sorted(df["seed"].unique().tolist())
+        note = (f'<p class="note"><b>ผล PoC บางส่วน ยังไม่ใช่ผลสุดท้าย:</b> ฝึกสูงสุด 50 epoch + early stopping (patience 10) '
+                f'ด้วย hyperparameter จริง, {len(df)} วิธี, seed {", ".join(map(str, seeds))} '
+                f'จึงยังไม่ทดสอบสถิติ ผลจริงใช้ 5 seeds ตาม RD_v2</p>')
+        warm = df[df["best_epoch"] <= 2]          # warmup_epochs ค่าเริ่มต้นใน train.py
+        if len(warm):
+            note += ('<p class="note" style="background:#ffe1e1;border-color:#d64545"><b>ระวัง:</b> '
+                     + ", ".join(f'{name(m)} (best epoch {int(e)})' for m, e in zip(warm["method"], warm["best_epoch"]))
+                     + ' ถูกเลือกโมเดลจาก epoch ที่อยู่ในช่วง warmup ของ lr คะแนน validation ตอนนั้นสูงโดยบังเอิญแล้ว epoch ต่อมาไม่เคยแซง '
+                     'ผล test จึงมาจากโมเดลที่แทบยังไม่ได้เรียนรู้ ส่วนต่างกับวิธีอื่นน่าจะเกินจริง ดูกราฟ validation ในข้อ 5 ประกอบ</p>')
     else:
         note = (f'<p class="note"><b>นี่คือ demo ไม่ใช่ผลสุดท้าย:</b> ใช้ข้อมูลจริงและ hyperparameter จริงของทุกวิธี ต่างแค่ฝึก {n_ep} epoch และ seed เดียว '
                 f'จึงยังไม่ทดสอบสถิติ ผลจริงจะใช้สูงสุด 50 epoch + early stopping และ 5 seeds ตาม RD_v2</p>')
@@ -241,7 +256,7 @@ h1{{font-size:22px}} h2{{font-size:17px;margin-top:28px}} img{{max-width:100%}}
 table{{border-collapse:collapse;font-size:13px;width:100%}} th,td{{border:1px solid #ddd;padding:5px 7px;text-align:right}}
 th{{background:#f2f4f8}} td:first-child{{text-align:left}}
 </style></head><body>
-<h1>{"[ข้อมูลสังเคราะห์] " if a.synthetic else ""}Demo: Mel–MFCC Fusion + AudioSet-Pretrained ConvNeXt บน ICBHI 2017</h1>
+<h1>{"[ข้อมูลสังเคราะห์] " if a.synthetic else ""}{"PoC" if a.poc else "Demo"}: Mel–MFCC Fusion + AudioSet-Pretrained ConvNeXt บน ICBHI 2017</h1>
 {note}
 <p><b>Setting เดียวกันทุกวิธี:</b> ICBHI 4 คลาสระดับรอบหายใจ, official split (train 4,142 / test 2,756 รอบ),
 validation แยกผู้ป่วย 20% ของ train, resample 16 kHz, band-pass 120–1800 Hz, augmentation เฉพาะ train,
@@ -251,12 +266,13 @@ loss ถ่วงน้ำหนักคลาส, เลือก epoch จา
 <h2>2. Ablation: ตัดเทคนิคออกทีละอย่าง</h2>
 <p>แต่ละแถวคือโมเดลที่เสนอที่เปลี่ยนไปหนึ่งอย่าง ค่าที่แสดงคือคะแนนลบด้วยโมเดลที่เสนอ
 <b style="color:#d64545">แดง (ติดลบ)</b> = ตัดออกแล้วแย่ลง แปลว่าเทคนิคนั้นช่วย,
-<b style="color:#3a9a5b">เขียว (บวก)</b> = ตัดออกแล้วไม่แย่ลง ยังไม่เห็นประโยชน์จาก demo นี้</p>
+<b style="color:#3a9a5b">เขียว (บวก)</b> = ตัดออกแล้วไม่แย่ลง ยังไม่เห็นประโยชน์จาก{"ผลชุดนี้" if a.poc else " demo นี้"}</p>
 {img("abl")}
 <div class="wrap">{tbl(t2)}</div>
 <h2>3. F1 รายคลาส (RQ2: feature ช่วย crackle / wheeze ต่างกันไหม)</h2>{img("cls")}
 <h2>4. Confusion matrix: โมเดลที่เสนอ เทียบกับ Mel อย่างเดียว</h2>{img("cm")}
-<h2>5. ICBHI score บน validation ระหว่างฝึก</h2>{img("curve")}
+<h2>5. ICBHI score บน validation ระหว่างฝึก</h2>
+<p>★ = epoch ที่ได้คะแนน validation สูงสุด ซึ่งเป็นโมเดลที่ถูกนำไปเปิด test</p>{img("curve")}
 <p style="color:#777;font-size:12px">อ้างอิงบน official split เดียวกัน (ตัวเลขจากเปเปอร์ ไม่ได้รันเอง): BTS (Interspeech 2024) 63.54%</p>
 </body></html>"""
     if a.synthetic:      # ข้อมูลสังเคราะห์มีแค่ไม่กี่สิบรอบ ไม่ใช่ official split จริง

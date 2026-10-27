@@ -16,12 +16,14 @@
     python -m src.run_experiments --plan main --use_tuned          # ใช้ lr ที่ดีที่สุดจาก tune
 """
 import argparse
+import gc
 import itertools
 import sys
 import traceback
 from pathlib import Path
 
 import pandas as pd
+import torch
 
 from .methods import METHODS, POC_METHODS, FULL_METHODS, ABLATIONS, COMPETITORS
 from .train import parse_args as train_args, run
@@ -103,6 +105,9 @@ def main():
         except Exception:
             traceback.print_exc()
             failed.append((ds, f, m, s))
+        gc.collect()                          # คืน VRAM ก่อนรันถัดไป (ทุกรันอยู่ใน process เดียวกัน)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     if failed:
         print("\nรันที่ล้มเหลว:", *failed, sep="\n  ")
         sys.exit(1)

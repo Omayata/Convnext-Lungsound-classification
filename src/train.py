@@ -30,6 +30,7 @@ from .datasets import load_dataset, get_split, cache_name, DATASET_DEFAULTS
 from .features import extract
 from .methods import METHODS
 from .metrics import all_metrics, confusion
+from .models import ProposedNet
 from .utils import set_seed, get_device, count_params, RESULTS_DIR, CLASS_NAMES, N_CLASSES, ROOT
 
 
@@ -62,6 +63,9 @@ def parse_args(argv=None):
     p.add_argument("--warmup_epochs", type=int, default=2)
     p.add_argument("--lr", type=float, default=None, help="ทับค่า lr ของวิธีนั้น")
     p.add_argument("--batch_size", type=int, default=None, help="ทับค่า batch size ของวิธีนั้น")
+    p.add_argument("--micro_batch", type=int, default=None,
+                   help="แบ่ง batch เป็นชิ้นละ N ตัวอย่างแล้วสะสม gradient (effective batch เท่าเดิม) "
+                        "ค่าเริ่มต้น: อัตโนมัติ 8 สำหรับโมเดล ConvNeXt เมื่อ GPU มี VRAM < 8 GB, 0 = ปิด")
     p.add_argument("--mixup_alpha", type=float, default=0.2, help="0 = ปิด mixup")
     p.add_argument("--no_specaug", action="store_true")
     p.add_argument("--no_class_weight", action="store_true")
@@ -201,6 +205,21 @@ def make_optimizer(model, cfg, args, steps_per_epoch):
     return opt, sched, kind, lr
 
 
+# วัดบน RTX 3050 Ti 4 GB (AMP, input ICBHI 8 s): ConvNeXt batch 16 ใช้ ~4.4 GB, batch 8 ~2.4 GB
+# คู่เทียบทุกตัวใช้ batch ต้นฉบับได้ไม่เกิน ~2.3 GB จึงแบ่งอัตโนมัติเฉพาะ ProposedNet (ไม่ไปเปลี่ยน BatchNorm ของคู่เทียบ)
+LOW_VRAM_GB, LOW_VRAM_MICRO = 8, 8
+
+
+def resolve_micro_batch(micro, bs, device, model):
+    """ขนาด micro-batch ที่ใช้จริง (0 = ไม่แบ่ง) None = อัตโนมัติตาม VRAM ของ GPU"""
+    if micro is None:
+        micro = 0
+        if device.type == "cuda" and isinstance(model, ProposedNet):
+            vram = torch.cuda.get_device_properties(device).total_memory / 2 ** 30
+            micro = LOW_VRAM_MICRO if vram < LOW_VRAM_GB else 0
+    return micro if 0 < micro < bs else 0
+
+
 @torch.no_grad()
 def predict(model, split, stats, device, bs, amp):
     model.eval()
@@ -262,7 +281,10 @@ def run(args):
     bs = args.batch_size or cfg["optim"]["batch_size"]
     steps = math.ceil(len(train) / bs)
     opt, sched, sched_kind, lr = make_optimizer(model, cfg["optim"], args, steps)
-    print(f"   params {n_params/1e6:.2f}M (trainable {n_train/1e6:.2f}M) | lr {lr} | batch {bs}")
+    mb = resolve_micro_batch(args.micro_batch, bs, device, model)
+    eval_bs = (mb or bs) * 2
+    print(f"   params {n_params/1e6:.2f}M (trainable {n_train/1e6:.2f}M) | lr {lr} | batch {bs}"
+          + (f" (micro-batch {mb} สะสม gradient)" if mb else ""))
 
     counts = np.bincount(train.labels, minlength=N_CLASSES).astype(np.float64)
     w = None if args.no_class_weight else torch.tensor(counts.sum() / (N_CLASSES * np.maximum(counts, 1)),
@@ -285,13 +307,23 @@ def run(args):
                 lam = float(rng.beta(args.mixup_alpha, args.mixup_alpha))
                 perm = torch.randperm(len(yt), device=device)
                 x = {k: lam * v + (1 - lam) * v[perm] for k, v in x.items()}
-            with torch.autocast(device.type, dtype=torch.float16, enabled=amp):
-                out = model(**x)
-                loss = criterion(out.float(), yt)
-                if perm is not None:
-                    loss = lam * loss + (1 - lam) * criterion(out.float(), yt[perm])
             opt.zero_grad(set_to_none=True)
-            scaler.scale(loss).backward()
+            # augmentation ทำกับทั้ง batch แล้วจึงแบ่ง micro-batch (ชิ้นขนาดใกล้กัน กัน BatchNorm เจอชิ้นละ 1 ตัว)
+            n = len(yt)
+            chunks = np.array_split(np.arange(n), math.ceil(n / mb)) if mb and mb < n else [np.arange(n)]
+            yp = yt[perm] if perm is not None else None
+            loss_sum = 0.0
+            for c in chunks:
+                c = torch.from_numpy(c).to(device)
+                with torch.autocast(device.type, dtype=torch.float16, enabled=amp):
+                    out = model(**{k: v[c] for k, v in x.items()})
+                    loss = criterion(out.float(), yt[c])
+                    if yp is not None:
+                        loss = lam * loss + (1 - lam) * criterion(out.float(), yp[c])
+                frac = len(c) / n
+                scaler.scale(loss * frac).backward()
+                loss_sum += loss.item() * frac
+            loss = torch.tensor(loss_sum)
             if args.grad_clip:
                 scaler.unscale_(opt)
                 nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -301,7 +333,7 @@ def run(args):
                 sched.step()
             losses.append(loss.item())
 
-        pv, _, _ = predict(model, val, stats, device, bs * 2, amp)
+        pv, _, _ = predict(model, val, stats, device, eval_bs, amp)
         mv = all_metrics(val.labels, pv.argmax(1))
         if sched_kind == "plateau":
             sched.step(mv["icbhi_score"])
@@ -324,6 +356,7 @@ def run(args):
 
     row = {"time": datetime.now().isoformat(timespec="seconds"), "dataset": args.dataset, "fold": str(args.fold),
            "method": name, "role": cfg["role"], "seed": args.seed, "lr": lr, "batch_size": bs,
+           "micro_batch": mb,
            "epochs_run": len(hist), "best_epoch": best_epoch, "params_M": round(n_params / 1e6, 3),
            "trainable_M": round(n_train / 1e6, 3), "train_time_min": round(train_time / 60, 2),
            "val_icbhi_score": round(best, 3), "mel_scale": args.mel_scale, "bandpass": not args.no_bandpass,
@@ -333,7 +366,7 @@ def run(args):
     run_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(hist).to_csv(run_dir / "history.csv", index=False)
     if not args.no_test:
-        pt, ms, gate = predict(model, test, stats, device, bs * 2, amp)
+        pt, ms, gate = predict(model, test, stats, device, eval_bs, amp)
         pred = pt.argmax(1)
         mt = all_metrics(test.labels, pred)
         row.update({k: round(v, 3) for k, v in mt.items()})

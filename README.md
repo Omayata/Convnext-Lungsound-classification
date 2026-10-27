@@ -113,7 +113,7 @@ python -m src.run_experiments --plan cross            # KAUH + HF_Lung × 5 fold
 python -m src.stats                                   # จะมี Friedman + Nemenyi เมื่อมีผลครบหลาย dataset
 ```
 
-**ตัวเลือกที่ใช้บ่อย:** `--epochs 50 --patience 10`, `--batch_size 16`, `--mel_scale pcen` (ablation PCEN), `--no_bandpass`, `--fusion concat`, `--tag _pcen` (ต่อท้ายชื่อในผล), `--save_ckpt`
+**ตัวเลือกที่ใช้บ่อย:** `--epochs 50 --patience 10`, `--batch_size 16`, `--micro_batch 8` (สะสม gradient สำหรับ GPU เล็ก effective batch เท่าเดิม และเปิดอัตโนมัติเมื่อ VRAM < 8 GB), `--mel_scale pcen` (ablation PCEN), `--no_bandpass`, `--fusion concat`, `--tag _pcen` (ต่อท้ายชื่อในผล), `--save_ckpt`
 
 ## ผลลัพธ์
 

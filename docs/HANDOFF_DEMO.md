@@ -62,7 +62,10 @@ python scripts/demo_report.py                  # -> results/demo/demo_report.htm
 
 - ถ้าเวลาไม่พอ: ต่อท้าย `--epochs 3` หรือเลือกบางวิธีด้วย `--methods proposed abl_mel_only wanasinghe_cnn ...`
 - เวลาโดยประมาณบน RTX 4070 SUPER: 1–3 ชั่วโมงสำหรับ 18 วิธี × 5 epoch (**ยังไม่ได้จับเวลาจริง** ควรจับเวลารันแรกก่อน)
-- ถ้า GPU memory ไม่พอ: `--batch_size 8`
+- ถ้า GPU memory ไม่พอ: ใช้ `--micro_batch 8` (หรือ 4) ซึ่งแบ่ง batch แล้วสะสม gradient โดย effective batch ยังเท่าเดิม ไม่ต้องแก้ hyperparameter
+  - GPU ที่มี VRAM < 8 GB จะเปิดให้อัตโนมัติ (micro-batch 8 เฉพาะโมเดล ConvNeXt) วัดบน RTX 3050 Ti 4 GB แล้ว: ConvNeXt ที่ batch 16 ใช้ ~4.4 GB, ที่ micro-batch 8 ใช้ ~2.4 GB, คู่เทียบทุกตัวใช้ batch ต้นฉบับได้ (≤ 2.3 GB)
+  - ข้อต่างเดียวคือ BatchNorm (bn0 ของ ConvNeXt AudioSet และทาง MFCC) คำนวณสถิติทีละ 8 ตัวอย่างแทน 16 ค่า `micro_batch` ที่ใช้ถูกบันทึกไว้ใน `results.csv`
+  - อย่าใช้ `--batch_size 8` แทน เพราะจะเปลี่ยน hyperparameter ของวิธี
 
 ## 4. ส่งอะไรกลับมา
 
