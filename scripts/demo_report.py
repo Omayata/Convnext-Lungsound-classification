@@ -171,7 +171,10 @@ def curves(run_root, df):
         h = pd.read_csv(f)
         ax.plot(h["epoch"], h["val_icbhi_score"], marker="o", lw=2.8 if m == "proposed" else 1.4,
                 color=color(m), label=name(m), zorder=3 if m == "proposed" else 2)
-        b = h["val_icbhi_score"].idxmax()            # epoch ที่ถูกเลือกไปเปิด test
+        # epoch ที่ถูกเลือกไปเปิด test (ตาม train.py ซึ่งไม่เลือกช่วง warmup) รันเก่าที่ไม่มีคอลัมน์ใช้ค่าสูงสุด
+        be = r.get("best_epoch")
+        b = h.index[h["epoch"] == int(be)][0] if pd.notna(be) and (h["epoch"] == int(be)).any() \
+            else h["val_icbhi_score"].idxmax()
         ax.plot(h["epoch"][b], h["val_icbhi_score"][b], marker="*", ms=16, color=color(m), mec="black", zorder=4)
     ax.set_xlabel("epoch")
     ax.xaxis.get_major_locator().set_params(integer=True)

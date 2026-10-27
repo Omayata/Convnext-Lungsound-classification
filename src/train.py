@@ -293,6 +293,8 @@ def run(args):
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
 
     best, best_state, best_epoch, bad, hist = -1.0, None, -1, 0, []
+    # ไม่เลือก epoch ในช่วง warmup (lr ยังไม่ถึงค่าจริง) และยังไม่นับ patience; ใช้กติกาเดียวกันทุกวิธี
+    select_from = min(args.warmup_epochs, args.epochs - 1)
     t_start = time.time()
     for epoch in range(args.epochs):
         model.train()
@@ -340,7 +342,9 @@ def run(args):
         hist.append({"epoch": epoch + 1, "loss": float(np.mean(losses)), "sec": time.time() - t0,
                      **{f"val_{k}": v for k, v in mv.items()}})
         flag = ""
-        if mv["icbhi_score"] > best:
+        if epoch < select_from:
+            flag = " (warmup ไม่นำมาเลือก)"
+        elif mv["icbhi_score"] > best:
             best, best_epoch, bad, flag = mv["icbhi_score"], epoch + 1, 0, " *"
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
         else:

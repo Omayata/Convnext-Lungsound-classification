@@ -17,7 +17,7 @@
 | 3.1 ทางหลัก | log-Mel 50–2000 Hz เข้า ConvNeXt-Tiny AudioSet ช่องเดียว | `features.py: MEL`, `ProposedNet` (ปรับแกนความถี่เป็น 224 bin ตาม checkpoint) |
 | 3.1 ทางเสริม | MFCC + ΔMFCC 2 channel, CNN 3 block | `AuxCNN` (MFCC 40 ค่า, Δ กว้าง 9 เฟรม) |
 | 3.1 Fusion | ต่อ embedding + SE gating + ชั้นจำแนก 4 คลาส | `SEGate`, `ProposedNet.head`; ค่า gate บันทึกใน `gate_mel`, `gate_aux` |
-| 3.1 การฝึก | AdamW, cosine, AMP, SpecAugment + mixup เฉพาะ train, drop path, early stopping ตาม ICBHI score, weighted CE | `train.py` (AdamW lr 1e-4 wd 0.05, warmup 2 epoch, drop path 0.1, mixup α 0.2, patience 10) |
+| 3.1 การฝึก | AdamW, cosine, AMP, SpecAugment + mixup เฉพาะ train, drop path, early stopping ตาม ICBHI score, weighted CE | `train.py` (AdamW lr 1e-4 wd 0.05, warmup 2 epoch (ไม่เลือก best epoch ในช่วง warmup), drop path 0.1, mixup α 0.2, patience 10) |
 | 3.2 คู่เทียบ 1–6 | ทำซ้ำตามต้นฉบับบน split เดียวกัน | `models.py`, `methods.py` (ดูส่วนที่ 2) |
 | 3.2 PoC | วิธี 1–4 และ 7 + โมเดลที่เสนอบน ICBHI | `--plan poc` |
 | 4 Fair comparison | split, preprocessing, STFT, epoch, early stopping, augmentation, loss เดียวกัน; งบปรับจูนเท่ากัน; รายงานพารามิเตอร์และเวลา | ค่ากลางใน `train.py`, `STFT` ใน `features.py`, `--plan tune`, คอลัมน์ `params_M`, `train_time_min`, `infer_ms_per_sample` |
