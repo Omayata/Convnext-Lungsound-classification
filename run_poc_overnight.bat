@@ -2,8 +2,12 @@
 chcp 65001 >nul
 set PYTHONIOENCODING=utf-8
 cd /d "%~dp0"
-set "PY=C:\Users\tonwa\AppData\Local\Programs\Python\Python312\python.exe"
+REM เลือก Python ตัวแรกที่มี: conda env "lung" (anaconda3 / miniconda3) -> Python 3.12 ของผู้ใช้ -> python ใน PATH
+set "PY=%USERPROFILE%\anaconda3\envs\lung\python.exe"
+if not exist "%PY%" set "PY=%USERPROFILE%\miniconda3\envs\lung\python.exe"
+if not exist "%PY%" set "PY=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
 if not exist "%PY%" set "PY=python"
+echo  Python: %PY%
 set "LOG=results\poc_overnight_log.txt"
 echo ============================================================
 echo  PoC run: proposed + abl_mel_only, seed 0, max 50 epochs
